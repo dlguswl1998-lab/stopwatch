@@ -1,0 +1,352 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>스탑워치</title>
+<style>
+  :root { --text:#fff; --muted:rgba(255,255,255,.88); --line:rgba(255,255,255,.3); --best:#c4ffa8; --worst:#ffb7ae; }
+  * { box-sizing:border-box; }
+  body {
+    margin:0; min-height:100vh; color:var(--text);
+    /* 수영장 실내 타일 벽 */
+    background:
+      radial-gradient(ellipse 70% 50% at 50% 30%, rgba(255,255,255,.28), transparent 70%),
+      repeating-linear-gradient(0deg, transparent 0 59px, rgba(255,255,255,.14) 59px 60px),
+      repeating-linear-gradient(90deg, transparent 0 59px, rgba(255,255,255,.14) 59px 60px),
+      linear-gradient(180deg, #2a86b8 0%, #5db4dc 60%, #9adcf0 100%);
+    background-attachment:fixed;
+    font-family:"Segoe UI","Malgun Gothic",sans-serif;
+    display:flex; justify-content:center; padding:24px 16px 240px;
+  }
+  .wrap { width:100%; max-width:340px; position:relative; z-index:2; }
+  .hint { text-shadow:0 1px 3px rgba(0,40,80,.6); }
+  /* 수영장 */
+  #pool { position:fixed; left:0; right:0; bottom:0; width:100%; height:280px; z-index:1; pointer-events:none; }
+  .wave { animation:wave 4s linear infinite; }
+  @keyframes wave { to { transform:translateX(-100px); } }
+  .shimmer { animation:shimmer 3s ease-in-out infinite alternate; }
+  @keyframes shimmer { from { opacity:.05; } to { opacity:.22; } }
+  .bob { animation:bob 2.6s ease-in-out infinite; }
+  @keyframes bob { 50% { transform:translateY(4px); } }
+  /* 머리: 올라올 땐 통통 튀며, 잠수할 땐 코를 막은 뒤 천천히 */
+  .head { transition:transform .7s cubic-bezier(.2,.8,.3,1.25) var(--d); }
+  .dive .head { transform:translateY(120px); transition:transform .9s cubic-bezier(.5,0,.6,1) calc(.6s + var(--d)); }
+  .arms { opacity:0; transform:translateY(16px); transition:all .3s calc(.8s + var(--d)); }
+  .dive .arms { opacity:1; transform:none; transition:all .3s var(--d); }
+  .eo, .ec { transition:opacity .1s calc(.6s + var(--d)); }
+  .eo { opacity:1; } .ec { opacity:0; }
+  .dive .eo { opacity:0; transition-delay:var(--d); }
+  .dive .ec { opacity:1; transition-delay:var(--d); }
+  .cheek { transform-box:fill-box; transform-origin:center; transition:transform .3s var(--d); }
+  .dive .cheek { transform:scale(1.4); }
+  .bubbles { opacity:0; transition:opacity .3s var(--d); }
+  .dive .bubbles { opacity:1; transition-delay:calc(1.1s + var(--d)); }
+  .bubble { animation:rise 2s ease-in infinite; }
+  @keyframes rise { 0% { opacity:0; transform:translateY(0); } 20% { opacity:1; } 100% { opacity:0; transform:translateY(-75px); } }
+  .drop { opacity:0; }
+  .up .drop { animation:pop .9s ease-out both; animation-delay:calc(.7s + var(--d)); }
+  @keyframes pop { 0% { opacity:0; transform:translateY(16px); } 30% { opacity:1; } 100% { opacity:0; transform:translateY(-26px); } }
+  .say { opacity:0; font:900 30px "Malgun Gothic",sans-serif; fill:#fff; stroke:#0a4a7a; stroke-width:6px; paint-order:stroke; text-anchor:middle; stroke-linejoin:round; }
+  .dive .sayDive { animation:say 1.1s ease both; }
+  .up .sayUp { animation:say 1.5s .8s ease both; }
+  @keyframes say { 0% { opacity:0; transform:translateY(10px); } 20%, 70% { opacity:1; transform:none; } 100% { opacity:0; } }
+  svg { width:100%; height:auto; display:block; filter:drop-shadow(0 22px 28px rgba(0,0,0,.65)); user-select:none; }
+  .press { cursor:pointer; transition:transform .08s; }
+  .press:active, .press.down { transform:translateY(4px); }
+  .digits { font-family:"Consolas","Courier New",monospace; font-weight:700; }
+  .row { display:flex; gap:12px; justify-content:center; margin:22px 0 18px; }
+  .row button {
+    flex:1; max-width:160px; padding:13px 0; border:none; border-radius:999px; cursor:pointer;
+    font:600 16px inherit; font-family:inherit; background:var(--pill); color:var(--text);
+    box-shadow:0 2px 6px rgba(0,0,0,.18); transition:transform .08s;
+  }
+  .row button:active { transform:scale(.96); }
+  #startBtn { background:#2f9e55; color:#fff; }
+  #startBtn.running { background:#d6322a; }
+  ul { list-style:none; margin:0; padding:0 12px; border-radius:12px; background:rgba(6,50,88,.4); backdrop-filter:blur(4px); max-height:130px; overflow:auto; }
+  ul:empty { display:none; }
+  /* 넓은 화면에서는 랩 기록을 오른쪽 위 패널로 빼서 아이들을 가리지 않게 */
+  @media (min-width:760px) {
+    ul { position:fixed; top:20px; right:20px; width:240px; max-height:calc(100vh - 320px); }
+  }
+  li { display:flex; justify-content:space-between; padding:11px 4px; border-bottom:1px solid var(--line);
+       font-variant-numeric:tabular-nums; font-size:16px; }
+  li .tot { color:var(--muted); font-size:13px; margin-left:12px; }
+  li.best { color:var(--best); } li.worst { color:var(--worst); }
+  .hint { text-align:center; color:var(--muted); font-size:12.5px; margin-top:16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<svg viewBox="0 0 400 440" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="스탑워치">
+  <defs>
+    <linearGradient id="metal" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#fdfdfd"/><stop offset=".25" stop-color="#9a9da3"/>
+      <stop offset=".5" stop-color="#f2f3f5"/><stop offset=".75" stop-color="#7d8086"/>
+      <stop offset="1" stop-color="#e6e7ea"/>
+    </linearGradient>
+    <linearGradient id="metal2" x1="1" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f4f4f6"/><stop offset=".5" stop-color="#8a8d93"/><stop offset="1" stop-color="#e9eaec"/>
+    </linearGradient>
+    <linearGradient id="cap" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#6e7077"/><stop offset=".35" stop-color="#f7f7f8"/><stop offset="1" stop-color="#6e7077"/>
+    </linearGradient>
+    <radialGradient id="face" cx=".4" cy=".3" r=".9">
+      <stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#ece8df"/>
+    </radialGradient>
+  </defs>
+
+  <!-- 상단 고리 -->
+  <circle cx="200" cy="30" r="17" fill="none" stroke="url(#metal2)" stroke-width="7"/>
+
+  <!-- 리셋/랩 버튼 (우측 상단) -->
+  <g transform="rotate(42 200 250)">
+    <g class="press" id="lapKnob">
+      <rect x="190" y="52" width="20" height="26" fill="url(#cap)"/>
+      <rect x="181" y="40" width="38" height="16" rx="4" fill="url(#cap)" stroke="#555" stroke-width=".8"/>
+    </g>
+  </g>
+  <!-- 시작/정지 크라운 (상단) -->
+  <g class="press" id="crown">
+    <rect x="188" y="46" width="24" height="34" fill="url(#cap)"/>
+    <rect x="174" y="34" width="52" height="18" rx="5" fill="url(#cap)" stroke="#555" stroke-width=".8"/>
+    <g stroke="#555" stroke-width=".8" opacity=".5">
+      <line x1="182" y1="36" x2="182" y2="50"/><line x1="190" y1="36" x2="190" y2="50"/>
+      <line x1="198" y1="36" x2="198" y2="50"/><line x1="206" y1="36" x2="206" y2="50"/>
+      <line x1="214" y1="36" x2="214" y2="50"/><line x1="222" y1="36" x2="222" y2="50"/>
+    </g>
+  </g>
+
+  <!-- 케이스 -->
+  <circle cx="200" cy="250" r="178" fill="url(#metal)"/>
+  <circle cx="200" cy="250" r="166" fill="url(#metal2)"/>
+  <circle cx="200" cy="250" r="158" fill="#2a2b2f"/>
+  <circle cx="200" cy="250" r="154" fill="url(#face)"/>
+
+  <g id="ticks"></g>
+  <g id="nums" font-family="Georgia,'Times New Roman',serif" font-size="17" font-weight="700" fill="#222" text-anchor="middle" dominant-baseline="central"></g>
+
+  <text x="200" y="178" text-anchor="middle" font-family="Georgia,serif" font-size="12" letter-spacing="4" fill="#555">STOPWATCH</text>
+
+  <!-- 디지털 창 -->
+  <rect x="146" y="192" width="108" height="30" rx="5" fill="#1b1d1c" stroke="#9a9a9a" stroke-width="1.5"/>
+  <text id="digital" class="digits" x="200" y="213" text-anchor="middle" font-size="21" fill="#9cf0a8">00:00.00</text>
+
+  <!-- 분 보조 다이얼 -->
+  <g id="sub">
+    <circle cx="200" cy="304" r="36" fill="#f7f4ec" stroke="#555" stroke-width="1.5"/>
+    <g id="subTicks"></g>
+    <g id="subNums" font-family="Georgia,serif" font-size="10" font-weight="700" fill="#222" text-anchor="middle" dominant-baseline="central"></g>
+    <text x="200" y="326" text-anchor="middle" font-size="7.5" letter-spacing="1" fill="#777">MIN</text>
+    <g id="minHand"><line x1="200" y1="310" x2="200" y2="279" stroke="#1d3f91" stroke-width="2.4" stroke-linecap="round"/></g>
+    <circle cx="200" cy="304" r="3" fill="#1d3f91"/>
+  </g>
+
+  <!-- 초침 -->
+  <g id="secHand">
+    <line x1="200" y1="278" x2="200" y2="124" stroke="#d6322a" stroke-width="2.6" stroke-linecap="round"/>
+    <circle cx="200" cy="278" r="6" fill="#d6322a"/>
+  </g>
+  <circle cx="200" cy="250" r="9" fill="#d6322a" stroke="#8c1c16" stroke-width="1.5"/>
+  <circle cx="200" cy="250" r="3" fill="#8c1c16"/>
+
+  <!-- 유리 반사 -->
+  <path d="M70 200 A140 140 0 0 1 250 108 A170 170 0 0 0 70 200Z" fill="#fff" opacity=".22"/>
+</svg>
+
+<p class="hint" id="state"><b>위쪽 버튼</b> 시작/정지 · <b>오른쪽 위 버튼</b> 랩/재설정</p>
+<ul id="laps"></ul>
+<p class="hint">키보드: Space 시작/정지 · L 랩 · R 재설정</p>
+</div>
+
+<svg id="pool" class="idle" viewBox="0 0 2400 280" preserveAspectRatio="xMidYMax slice" aria-hidden="true">
+  <defs>
+    <linearGradient id="wBack" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#46c0ee"/><stop offset="1" stop-color="#0c5c98"/>
+    </linearGradient>
+    <linearGradient id="wFront" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#7fd6f5" stop-opacity=".5"/><stop offset="1" stop-color="#0f6fb0" stop-opacity=".55"/>
+    </linearGradient>
+  </defs>
+  <g id="waterBack"></g>
+  <g id="babies"></g>
+  <g id="waterFront"></g>
+  <g id="fx"></g>
+  <text class="say sayDive" x="1200" y="46">읍!</text>
+  <text class="say sayUp" x="1200" y="46">푸하~!</text>
+</svg>
+
+<script>
+  const NS ='http://www.w3.org/2000/svg';
+  const $ = id => document.getElementById(id);
+  const CX = 200, CY = 250;
+
+  function line(parent, cx, cy, ang, r1, r2, w, color) {
+    const a = ang * Math.PI / 180, l = document.createElementNS(NS, 'line');
+    l.setAttribute('x1', cx + r1 * Math.sin(a)); l.setAttribute('y1', cy - r1 * Math.cos(a));
+    l.setAttribute('x2', cx + r2 * Math.sin(a)); l.setAttribute('y2', cy - r2 * Math.cos(a));
+    l.setAttribute('stroke', color); l.setAttribute('stroke-width', w);
+    parent.appendChild(l);
+  }
+  function label(parent, cx, cy, ang, r, text) {
+    const a = ang * Math.PI / 180, t = document.createElementNS(NS, 'text');
+    t.setAttribute('x', cx + r * Math.sin(a)); t.setAttribute('y', cy - r * Math.cos(a));
+    t.textContent = text; parent.appendChild(t);
+  }
+  // 메인 눈금: 0.2초 단위 300칸
+  for (let i = 0; i < 300; i++) {
+    const ang = i * 1.2;
+    if (i % 25 === 0) line($('ticks'), CX, CY, ang, 130, 148, 3, '#222');
+    else if (i % 5 === 0) line($('ticks'), CX, CY, ang, 136, 148, 1.6, '#222');
+    else line($('ticks'), CX, CY, ang, 143, 148, .8, '#555');
+  }
+  for (let s = 5; s <= 60; s += 5) label($('nums'), CX, CY, s * 6, 114, s);
+  // 분 보조 다이얼: 30분
+  for (let m = 0; m < 30; m++) line($('subTicks'), CX, 304, m * 12, m % 5 ? 30 : 27, 33, m % 5 ? .8 : 1.5, '#333');
+  [[30, 30], [10, 10], [20, 20]].forEach(([m, t]) => label($('subNums'), CX, 304, m * 12, 19, t));
+
+  // ===== 수영장 장면 만들기 =====
+  const S = 130; // 수면 y
+  const wavePath = `M0 ${S} q25 -8 50 0` + ' t50 0'.repeat(50) + ' L2600 280 L0 280 Z';
+  let back = `<path class="wave" d="${wavePath}" fill="url(#wBack)"/>`;
+  for (let i = 0; i < 12; i++) {
+    back += `<ellipse class="shimmer" cx="${60 + i * 205}" cy="${160 + (i % 3) * 38}" rx="55" ry="8" fill="#fff" style="animation-delay:-${(i * 0.7) % 3}s"/>`;
+  }
+  $('waterBack').innerHTML = back;
+  $('waterFront').innerHTML = `<path class="wave" d="${wavePath}" fill="url(#wFront)" style="animation-delay:-1.6s"/>`;
+
+  const kids = [
+    { x: -440, skin: '#ffd9b8', skin2: '#f0b894', cap: '#ff6b6b', suit: '#ff8fa3', d: 0,   b: 0 },
+    { x: -220, skin: '#c68642', skin2: '#a96a2c', cap: '#ffd43b', suit: '#4dabf7', d: .15, b: .6 },
+    { x: 0,    skin: '#ffdbc0', skin2: '#eeb592', cap: '#51cf66', suit: '#ffd43b', d: .3,  b: 1.2 },
+    { x: 220,  skin: '#8d5524', skin2: '#6e3f15', cap: '#ff8ad8', suit: '#74c0fc', d: .1,  b: 1.8 },
+    { x: 440,  skin: '#f1c27d', skin2: '#d8a05a', cap: '#4dabf7', suit: '#ff922b', d: .25, b: 2.2 },
+  ];
+  let kidHTML = '', fxHTML = '';
+  for (const k of kids) {
+    const X = 1200 + k.x;
+    kidHTML += `
+    <g transform="translate(${X} ${S - 30})" style="--d:${k.d}s">
+     <g class="bob" style="animation-delay:-${k.b}s">
+      <g class="head">
+        <ellipse cx="0" cy="62" rx="27" ry="24" fill="${k.suit}"/>
+        <circle cx="-34" cy="4" r="7" fill="${k.skin}"/><circle cx="34" cy="4" r="7" fill="${k.skin}"/>
+        <circle cx="0" cy="0" r="34" fill="${k.skin}"/>
+        <circle class="cheek" cx="-21" cy="14" r="6" fill="#ff8a8a" opacity=".55"/>
+        <circle class="cheek" cx="21" cy="14" r="6" fill="#ff8a8a" opacity=".55"/>
+        <g class="eo"><circle cx="-12" cy="2" r="4" fill="#2b2b2b"/><circle cx="12" cy="2" r="4" fill="#2b2b2b"/>
+          <circle cx="-10.8" cy="0.6" r="1.3" fill="#fff"/><circle cx="13.2" cy="0.6" r="1.3" fill="#fff"/></g>
+        <g class="ec" fill="none" stroke="#2b2b2b" stroke-width="2.4" stroke-linecap="round">
+          <path d="M-18 1 Q-12 7 -6 1"/><path d="M6 1 Q12 7 18 1"/></g>
+        <ellipse cx="0" cy="10" rx="3.5" ry="2.6" fill="${k.skin2}"/>
+        <path d="M-8 20 Q0 28 8 20" fill="none" stroke="#7a3b2e" stroke-width="2.4" stroke-linecap="round"/>
+        <path d="M-35 -8 A35 35 0 0 1 35 -8 Q0 -1 -35 -8Z" fill="${k.cap}"/>
+        <path d="M-22 -27 Q-15 -38 -3 -40" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" opacity=".5"/>
+        <circle cx="0" cy="-43" r="5" fill="${k.cap}"/>
+        <g class="arms" fill="none" stroke="${k.skin}" stroke-width="10" stroke-linecap="round">
+          <path d="M-32 58 Q-34 26 -5 12"/><path d="M32 58 Q34 26 5 12"/>
+          <circle cx="-4" cy="11" r="7" fill="${k.skin2}" stroke="none"/><circle cx="4" cy="11" r="7" fill="${k.skin2}" stroke="none"/>
+        </g>
+      </g>
+     </g>
+    </g>`;
+    fxHTML += `
+    <g transform="translate(${X} ${S - 30})" style="--d:${k.d}s">
+      <g class="bubbles">
+        <g class="bubble" style="animation-delay:-${k.b / 2}s"><circle cx="-10" cy="95" r="5" fill="rgba(255,255,255,.35)" stroke="#fff" stroke-width="1.5"/></g>
+        <g class="bubble" style="animation-delay:-${k.b / 2 + .7}s"><circle cx="8" cy="100" r="3.5" fill="rgba(255,255,255,.35)" stroke="#fff" stroke-width="1.5"/></g>
+        <g class="bubble" style="animation-delay:-${k.b / 2 + 1.3}s"><circle cx="-1" cy="105" r="4.5" fill="rgba(255,255,255,.35)" stroke="#fff" stroke-width="1.5"/></g>
+      </g>
+      <g fill="#cdeeff" stroke="#fff" stroke-width="1">
+        <circle class="drop" cx="-32" cy="-30" r="4"/><circle class="drop" cx="32" cy="-30" r="4"/>
+        <circle class="drop" cx="-16" cy="-52" r="3.5"/><circle class="drop" cx="16" cy="-52" r="3.5"/>
+      </g>
+    </g>`;
+  }
+  $('babies').innerHTML = kidHTML;
+  $('fx').innerHTML = fxHTML;
+
+  const lapsEl = $('laps');
+  function syncUI() {
+    $('lapKnob').style.opacity = (running || elapsed > 0) ? 1 : .45;
+    $('state').innerHTML = running
+      ? '<b>위쪽 버튼</b> 정지 · <b>오른쪽 위 버튼</b> 랩'
+      : elapsed > 0
+        ? '<b>위쪽 버튼</b> 다시 시작 · <b>오른쪽 위 버튼</b> 재설정'
+        : '<b>위쪽 버튼</b>을 눌러 시작';
+  }
+  let running = false, startTime = 0, elapsed = 0, rafId = null, laps = [], lastLapTotal = 0;
+
+  const p2 = n => String(n).padStart(2, '0');
+  function fmt(ms) {
+    const cs = Math.floor(ms / 10) % 100, s = Math.floor(ms / 1000) % 60;
+    const m = Math.floor(ms / 60000) % 60, h = Math.floor(ms / 3600000);
+    return (h ? h + ':' : '') + p2(m) + ':' + p2(s) + '.' + p2(cs);
+  }
+  const now = () => running ? elapsed + (performance.now() - startTime) : elapsed;
+
+  function render() {
+    const t = now();
+    $('secHand').setAttribute('transform', `rotate(${(t % 60000) / 60000 * 360} ${CX} ${CY})`);
+    $('minHand').setAttribute('transform', `rotate(${(t / 60000 % 30) / 30 * 360} ${CX} 304)`);
+    $('digital').textContent = fmt(t);
+    const cur = $('curLap');
+    if (cur) cur.textContent = fmt(t - lastLapTotal);
+    if (running) rafId = requestAnimationFrame(render);
+  }
+
+  function renderLaps() {
+    lapsEl.innerHTML = '';
+    if (!running && elapsed === 0) return;
+    const min = laps.length > 1 ? Math.min(...laps) : null;
+    const max = laps.length > 1 ? Math.max(...laps) : null;
+    lapsEl.insertAdjacentHTML('beforeend',
+      `<li><span>랩 ${laps.length + 1}</span><span id="curLap">${fmt(now() - lastLapTotal)}</span></li>`);
+    let total = laps.reduce((a, b) => a + b, 0);
+    for (let i = laps.length - 1; i >= 0; i--) {
+      const cls = laps[i] === min ? 'best' : laps[i] === max ? 'worst' : '';
+      lapsEl.insertAdjacentHTML('beforeend',
+        `<li class="${cls}"><span>랩 ${i + 1}</span><span>${fmt(laps[i])}<span class="tot">${fmt(total)}</span></span></li>`);
+      total -= laps[i];
+    }
+  }
+
+  function toggle() {
+    if (running) {
+      elapsed += performance.now() - startTime;
+      running = false; cancelAnimationFrame(rafId);
+      $('pool').setAttribute('class', 'up'); // 얼굴을 물 밖으로
+      syncUI(); render();
+    } else {
+      startTime = performance.now(); running = true;
+      $('pool').setAttribute('class', 'dive'); // 코를 막고 잠수
+      syncUI();
+      if (!lapsEl.children.length) renderLaps();
+      render();
+    }
+  }
+  function lap() {
+    if (!running) return;
+    const t = now(); laps.push(t - lastLapTotal); lastLapTotal = t; renderLaps();
+  }
+  function reset() {
+    if (running) return;
+    elapsed = 0; laps = []; lastLapTotal = 0;
+    syncUI(); renderLaps(); render();
+  }
+  const lapOrReset = () => running ? lap() : reset();
+
+  $('crown').addEventListener('click', toggle);
+  $('lapKnob').addEventListener('click', lapOrReset);
+
+  document.addEventListener('keydown', e => {
+    if (e.repeat) return;
+    if (e.code === 'Space') { e.preventDefault(); toggle(); }
+    else if (e.key === 'l' || e.key === 'L') lap();
+    else if (e.key === 'r' || e.key === 'R') reset();
+  });
+  syncUI(); render();
+</script>
+</body>
+</html>
